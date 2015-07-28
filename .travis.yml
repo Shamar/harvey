@@ -1,4 +1,7 @@
 language: c
 script: ./BUILD all
 compiler: gcc
-
+addons:
+  apt:
+    packages:
+    - qemu-kvm
