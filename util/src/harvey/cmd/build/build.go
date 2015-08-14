@@ -113,32 +113,42 @@ func adjust(s []string) (r []string) {
 	return
 }
 
+// send cmd to a shell
 func sh(cmd *exec.Cmd){
-	commandString := strings.Join(cmd.Args, " ")
-	if os.Getenv("LD_PRELOAD") != "" {
-		// we need a shell to trust the build environment,
-		// see https://github.com/Harvey-OS/harvey/issues/8#issuecomment-131235178
-		shell := exec.Command(tools["sh"])
-		shell.Env = cmd.Env
+	shell := exec.Command(tools["sh"])
+	shell.Env = cmd.Env
 
-		if shStdin, e := shell.StdinPipe(); e == nil {
-			go func(){
-				defer shStdin.Close()
-				io.WriteString(shStdin, commandString)
-			}()
-		} else {
-			log.Fatalf("cannot pipe [%v] to %s: %v", commandString, tools["sh"], e)
-		}
-		cmd = shell
+	commandString := strings.Join(cmd.Args, " ")
+	if shStdin, e := shell.StdinPipe(); e == nil {
+		go func(){
+			defer shStdin.Close()
+			io.WriteString(shStdin, commandString)
+		}()
 	} else {
-		cmd.Stdin = os.Stdin
+		log.Fatalf("cannot pipe [%v] to %s: %v", commandString, tools["sh"], e)
 	}
-	cmd.Stderr = os.Stderr
-	cmd.Stdout = os.Stdout
+	shell.Stderr = os.Stderr
+	shell.Stdout = os.Stdout
 
 	log.Printf("[%v]", commandString)
-	err := cmd.Run()
+	err := shell.Run()
 	failOn(err)
+}
+
+// run cmd preserving $LD_PRELOAD tricks
+func withPreloadTricks(cmd *exec.Cmd){
+	if os.Getenv("LD_PRELOAD") != "" {
+		// we need a shell to enable $LD_PRELOAD tricks,
+		// see https://github.com/Harvey-OS/harvey/issues/8#issuecomment-131235178
+		sh(cmd)
+	} else {
+		cmd.Stdin = os.Stdin
+		cmd.Stderr = os.Stderr
+		cmd.Stdout = os.Stdout
+		log.Printf("%v", cmd.Args)
+		err := cmd.Run()
+		failOn(err)
+	}
 }
 
 func process(f string, b *build) {
@@ -207,7 +217,7 @@ func compile(b *build) {
 			argscmd := append(args, []string{i}...)
 			cmd := exec.Command(tools["cc"], argscmd...)
 			cmd.Env = append(os.Environ(), b.Env...)
-			sh(cmd)
+			withPreloadTricks(cmd)
 			argscmd = args
 		}
 	} else {
@@ -215,7 +225,7 @@ func compile(b *build) {
 		cmd := exec.Command(tools["cc"], args...)
 		cmd.Env = append(os.Environ(), b.Env...)
 
-		sh(cmd)
+		withPreloadTricks(cmd)
 	}
 }
 
@@ -239,7 +249,7 @@ func link(b *build) {
 			cmd := exec.Command(tools["ld"], args...)
 			cmd.Env = append(os.Environ(), b.Env...)
 
-			sh(cmd)
+			withPreloadTricks(cmd)
 		}
 	} else {
 		args := []string{"-o", b.Program}
@@ -250,7 +260,7 @@ func link(b *build) {
 		cmd := exec.Command(tools["ld"], args...)
 		cmd.Env = append(os.Environ(), b.Env...)
 
-		sh(cmd)
+		withPreloadTricks(cmd)
 	}
 }
 
@@ -279,14 +289,14 @@ func install(b *build) {
 
 			cmd := exec.Command("mv", args...)
 
-			sh(cmd)
+			withPreloadTricks(cmd)
 		}
 	} else if len(b.Program) > 0 {
 		args := []string{b.Program}
 		args = append(args, installpath...)
 		cmd := exec.Command("mv", args...)
 
-		sh(cmd)
+		withPreloadTricks(cmd)
 	} else if len(b.Library) > 0 {
 		args := []string{"-rvs"}
 		libpath := installpath[0] + "/" + b.Library
@@ -307,10 +317,10 @@ func install(b *build) {
 		cmd := exec.Command(tools["ar"], args...)
 
 		log.Printf("*** Installing %v ***", b.Library)
-		sh(cmd)
+		withPreloadTricks(cmd)
 
 		cmd = exec.Command(tools["ranlib"], libpath)
-		sh(cmd)
+		withPreloadTricks(cmd)
 	}
 
 }
@@ -319,7 +329,7 @@ func run(b *build, cmd []string) {
 	for _, v := range cmd {
 		cmd := exec.Command(v)
 		cmd.Env = append(os.Environ(), b.Env...)
-		sh(cmd)
+		sh(cmd) // we need a shell here
 	}
 }
 
@@ -348,7 +358,7 @@ func data2c(name string, path string) (string, error) {
 		args := []string{"-o", tmpf.Name(), path}
 		cmd := exec.Command(tools["strip"], args...)
 		cmd.Env = os.Environ()
-		sh(cmd)
+		withPreloadTricks(cmd)
 
 		in, err = ioutil.ReadAll(tmpf)
 		failOn(err)
