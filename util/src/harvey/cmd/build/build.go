@@ -130,6 +130,8 @@ func sh(cmd *exec.Cmd){
 			log.Fatalf("cannot pipe [%v] to %s: %v", commandString, tools["sh"], e)
 		}
 		cmd = shell
+	} else {
+		cmd.Stdin = os.Stdin
 	}
 	cmd.Stderr = os.Stderr
 	cmd.Stdout = os.Stdout
@@ -550,7 +552,8 @@ func main() {
 	cwd, err = os.Getwd()
 	failOn(err)
 	harvey = os.Getenv("HARVEY")
-	err := findTools(os.Getenv("TOOLPREFIX"))
+	
+	err = findTools(os.Getenv("TOOLPREFIX"))
 	failOn(err)
 
 	if harvey == "" {
@@ -584,6 +587,7 @@ func findTools(toolprefix string) (err error) {
 		v = toolprefix + v
 		v, err = exec.LookPath(v)
 		failOn(err)
+		log.Printf("findTool: %v -> %v", k, v)
 		tools[k] = v
 	}
 	return nil
