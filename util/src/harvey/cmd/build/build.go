@@ -91,13 +91,15 @@ var (
 	}
 )
 
-func fail(err error) {
+// fail with message, if err is not nil
+func failOn(err error) {
 	if err != nil {
-		log.Fatalf("%v", err)
+		log.Fatalf("%v\n", err)
 	}
 }
 
 func adjust1(s string) string {
+	s = os.ExpandEnv(s)
 	if path.IsAbs(s) {
 		return path.Join(harvey, s)
 	}
@@ -112,27 +114,29 @@ func adjust(s []string) (r []string) {
 }
 
 func sh(cmd *exec.Cmd){
-	bash := exec.Command(tools["sh"])
-	bash.Env = cmd.Env
-	bash.Stderr = os.Stderr
-	bash.Stdout = os.Stdout
 	commandString := strings.Join(cmd.Args, " ")
+	if os.Getenv("LD_PRELOAD") != "" {
+		// we need a shell to trust the build environment,
+		// see https://github.com/Harvey-OS/harvey/issues/8#issuecomment-131235178
+		shell := exec.Command(tools["sh"])
+		shell.Env = cmd.Env
 
-	if bashIn, e := bash.StdinPipe(); e == nil {
-
-		go func(){
-			defer bashIn.Close()
-			io.WriteString(bashIn, commandString)
-		}()
-
-		log.Printf("[%v]", commandString)
-		err := bash.Run()
-		if err != nil {
-			log.Fatalf("%v\n", err)
+		if shStdin, e := shell.StdinPipe(); e == nil {
+			go func(){
+				defer shStdin.Close()
+				io.WriteString(shStdin, commandString)
+			}()
+		} else {
+			log.Fatalf("cannot pipe [%v] to %s: %v", commandString, tools["sh"], e)
 		}
-	} else {
-		log.Fatalf("cannot pipe [%v] to %s: %v", commandString, tools["sh"], e)
+		cmd = shell
 	}
+	cmd.Stderr = os.Stderr
+	cmd.Stdout = os.Stdout
+
+	log.Printf("[%v]", commandString)
+	err := cmd.Run()
+	failOn(err)
 }
 
 func process(f string, b *build) {
@@ -141,17 +145,16 @@ func process(f string, b *build) {
 	}
 	log.Printf("Processing %v", f)
 	d, err := ioutil.ReadFile(f)
-	fail(err)
+	failOn(err)
 	var build build
 	err = json.Unmarshal(d, &build)
-	fail(err)
+	failOn(err)
 	b.jsons[f] = true
 
 	if len(b.jsons) == 1 {
 		cwd, err := os.Getwd()
-		if err != nil {
-			log.Fatalf("%v", err)
-		}
+		failOn(err)
+
 		b.path = path.Join(cwd, f)
 		b.Name = build.Name
 		b.Kernel = build.Kernel
@@ -256,9 +259,8 @@ func install(b *build) {
 	installpath := adjust([]string{os.ExpandEnv(b.Install)})
 	// Make sure they're all there.
 	for _, v := range installpath {
-		if err := os.MkdirAll(v, 0755); err != nil {
-			log.Fatalf("%v", err)
-		}
+		err := os.MkdirAll(v, 0755)
+		failOn(err)
 	}
 
 	if len(b.SourceFilesCmd) > 0 {
@@ -324,7 +326,7 @@ func projects(b *build) {
 		wd := path.Dir(v)
 		f := path.Base(v)
 		cwd, err := os.Getwd()
-		fail(err)
+		failOn(err)
 		os.Chdir(wd)
 		project(f)
 		os.Chdir(cwd)
@@ -339,30 +341,28 @@ func data2c(name string, path string) (string, error) {
 		elf.Close()
 		cwd, err := os.Getwd()
 		tmpf, err := ioutil.TempFile(cwd, name)
-		if err != nil {
-			log.Fatalf("%v\n", err)
-		}
+		failOn(err)
+
 		args := []string{"-o", tmpf.Name(), path}
 		cmd := exec.Command(tools["strip"], args...)
 		cmd.Env = os.Environ()
 		sh(cmd)
 
 		in, err = ioutil.ReadAll(tmpf)
-		if err != nil {
-			log.Fatalf("%v\n", err)
-		}
+		failOn(err)
+
 		tmpf.Close()
 		os.Remove(tmpf.Name())
 	} else {
 		var file *os.File
 		var err error
-		if file, err = os.Open(path); err != nil {
-			log.Fatalf("%v", err)
-		}
+
+		file, err = os.Open(path);
+		failOn(err)
+
 		in, err = ioutil.ReadAll(file)
-		if err != nil {
-			log.Fatalf("%v\n", err)
-		}
+		failOn(err)
+
 		file.Close()
 	}
 
@@ -388,9 +388,8 @@ func confcode(path string, kern *kernel) []byte {
 	if kern.Ramfiles != nil {
 		for name, path := range kern.Ramfiles {
 			code, err := data2c(name, adjust1(path))
-			if err != nil {
-				log.Fatalf("%v\n", err)
-			}
+			failOn(err)
+
 			rootcodes = append(rootcodes, code)
 			rootnames = append(rootnames, name)
 		}
@@ -496,19 +495,15 @@ char* conffile = "{{ .Path }}";
 `)
 
 	codebuf := bytes.NewBuffer(nil)
-	if err != nil {
-		log.Fatalf("%v\n", err)
-	}
+	failOn(err)
+
 	err = tmpl.Execute(codebuf, vars)
-	if err != nil {
-		log.Fatalf("%v\n", err)
-	}
+	failOn(err)
 
 	return codebuf.Bytes()
 }
 
 func buildkernel(b *build) {
-
 	if b.Kernel == nil {
 		return
 	}
@@ -518,7 +513,6 @@ func buildkernel(b *build) {
 	if err := ioutil.WriteFile(b.Name+".c", codebuf, 0666); err != nil {
 		log.Fatalf("Writing %s.c: %v", b.Name, err)
 	}
-
 }
 
 // assumes we are in the wd of the project.
@@ -554,11 +548,11 @@ func main() {
 	var badsetup bool
 	var err error
 	cwd, err = os.Getwd()
-	fail(err)
+	failOn(err)
 	harvey = os.Getenv("HARVEY")
-	if err := findTools(os.Getenv("TOOLPREFIX")); err != nil {
-		fail(err)
-	}
+	err := findTools(os.Getenv("TOOLPREFIX"))
+	failOn(err)
+
 	if harvey == "" {
 		log.Printf("You need to set the HARVEY environment variable")
 		badsetup = true
@@ -578,7 +572,7 @@ func main() {
 	dir := path.Dir(os.Args[1])
 	file := path.Base(os.Args[1])
 	err = os.Chdir(dir)
-	fail(err)
+	failOn(err)
 	project(file)
 }
 
@@ -589,9 +583,7 @@ func findTools(toolprefix string) (err error) {
 		}
 		v = toolprefix + v
 		v, err = exec.LookPath(v)
-		if err != nil {
-			return err
-		}
+		failOn(err)
 		tools[k] = v
 	}
 	return nil
