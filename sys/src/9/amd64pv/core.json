@@ -9,6 +9,7 @@
 		"-fno-builtin",
 		"-DKERNDATE=1433623937",
 		"-g",
+		"-gdwarf-2",
 		"-ggdb",
 		"-fvar-tracking",
 		"-fvar-tracking-assignments",

@@ -11,7 +11,12 @@
 		"-Wno-parentheses",
 		"-Wno-unknown-pragmas",
 		"-Wuninitialized",
-		"-g"
+		"-g",
+		"-gdwarf-2",
+                "-ggdb",
+                "-fno-omit-frame-pointer",
+                "-fvar-tracking",
+                "-fvar-tracking-assignments"
 	],
 	"Name": "KernelLibs",
 	"Oflags": [

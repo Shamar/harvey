@@ -12,6 +12,7 @@
 		"-Wno-parentheses",
 		"-Wno-unknown-pragmas",
 		"-g",
+		"-gdwarf-2",
 		"-ggdb",
 		"-fno-omit-frame-pointer",
 		"-fvar-tracking",
