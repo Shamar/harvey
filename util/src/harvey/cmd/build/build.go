@@ -597,7 +597,6 @@ func findTools(toolprefix string) (err error) {
 		v = toolprefix + v
 		v, err = exec.LookPath(v)
 		failOn(err)
-		log.Printf("findTool: %v -> %v", k, v)
 		tools[k] = v
 	}
 	return nil
