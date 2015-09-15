@@ -1,10 +1,10 @@
 .TH LOCK 2
 .SH NAME
-lock, canlock, unlock,
-qlock, canqlock, qunlock,
-rlock, canrlock, runlock,
-wlock, canwlock, wunlock,
-rsleep, rwakeup, rwakeupall,
+lock, lockt, canlock, unlock,
+qlock, qlockt, canqlock, qunlock,
+rlock, rlockt, canrlock, runlock,
+wlock, wlockt, canwlock, wunlock,
+rsleep, rsleept, rwakeup, rwakeupall,
 incref, decref
 \- spin locks, queueing rendezvous locks, reader-writer locks, rendezvous points, and reference counts
 .SH SYNOPSIS
@@ -16,24 +16,28 @@ incref, decref
 .ft L
 .nf
 void	lock(Lock *l)
+int	lockt(Lock *l, uint32_t ms)
 int	canlock(Lock *l)
 void	unlock(Lock *l)
 .PP
 .ft L
 .nf
 void	qlock(QLock *l)
+int	qlockt(QLock *l, uint32_t ms)
 int	canqlock(QLock *l)
 void	qunlock(QLock *l)
 .PP
 .ft L
 .nf
 void	rlock(RWLock *l)
+int	rlockt(RWLock *l, uint32_t ms)
 int	canrlock(RWLock *l)
 void	runlock(RWLock *l)
 .PP
 .ft L
 .nf
 void	wlock(RWLock *l)
+int	wlockt(RWLock *l, uint32_t ms)
 int	canwlock(RWLock *l)
 void	wunlock(RWLock *l)
 .PP
@@ -47,6 +51,7 @@ typedef struct Rendez {
 .ft L
 .nf
 void	rsleep(Rendez *r)
+int	rsleept(Rendez *r, uint32_t ms)
 int	rwakeup(Rendez *r)
 int	rwakeupall(Rendez *r)
 .PP
@@ -95,6 +100,11 @@ thread library because they prevent context switches between threads.
 .PP
 .I Lock
 blocks until the lock has been obtained.
+.I Lockt
+blocks up to 
+.I ms
+milliseconds and returns a non-zero value if it was successful within
+that interval, 0 otherwise.
 .I Canlock
 is non-blocking.
 It tries to obtain a lock and returns a non-zero value if it
@@ -130,6 +140,10 @@ releases it.
 and
 .I canwlock
 are the non-blocking versions.
+.I Rlockt
+and
+.I wlockt
+provide timeout semantics.
 There may be any number of simultaneous readers,
 but only one writer.
 Moreover,
@@ -148,16 +162,17 @@ is protected by a
 .IB r -> l \fR,
 which must be held by the callers of
 .IR rsleep ,
+.IR rsleept ,
 .IR rwakeup ,
 and
 .IR rwakeupall .
 .I Rsleep
-atomically releases
+and
+.I Rsleept
+atomically release
 .IB r -> l
-and suspends execution of the calling task.
-After resuming execution,
-.I rsleep
-will reacquire
+and suspend execution of the calling task.
+After resuming execution, both will reacquire
 .IB r -> l
 before returning.
 If any processes are sleeping on

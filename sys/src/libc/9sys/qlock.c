@@ -55,18 +55,16 @@ getqlp(void)
 	return p;
 }
 
-void
-qlock(QLock *q)
+static void
+_qlock(QLock *q)
 {
 	QLp *p, *mp;
 
-	lock(&q->lock);
 	if(!q->locked){
 		q->locked = 1;
 		unlock(&q->lock);
 		return;
 	}
-
 
 	/* chain into waiting list */
 	mp = getqlp();
@@ -83,6 +81,23 @@ qlock(QLock *q)
 	while((*_rendezvousp)(mp, (void*)1) == (void*)~0)
 		;
 	mp->inuse = 0;
+}
+
+void
+qlock(QLock *q)
+{
+	lock(&q->lock);
+	_qlock(q);
+}
+
+int
+qlockt(QLock *q, uint32_t ms)
+{
+	if(lockt(&q->lock, ms)) {
+		_qlock(q);
+		return 1;
+	}
+	return 0;
 }
 
 void
@@ -123,12 +138,11 @@ canqlock(QLock *q)
 	return 0;
 }
 
-void
-rlock(RWLock *q)
+static void
+_rlock(RWLock *q)
 {
 	QLp *p, *mp;
 
-	lock(&q->lock);
 	if(q->writer == 0 && q->head == nil){
 		/* no writer, go for it */
 		q->_readers++;
@@ -151,6 +165,23 @@ rlock(RWLock *q)
 	while((*_rendezvousp)(mp, (void*)1) == (void*)~0)
 		;
 	mp->inuse = 0;
+}
+
+void
+rlock(RWLock *q)
+{
+	lock(&q->lock);
+	_rlock(q);
+}
+
+int
+rlockt(RWLock *q, uint32_t ms)
+{
+	if(lockt(&q->lock, ms)){
+		_rlock(q);
+		return 1;
+	}
+	return 0;
 }
 
 int
@@ -195,12 +226,11 @@ runlock(RWLock *q)
 		;
 }
 
-void
-wlock(RWLock *q)
+static void
+_wlock(RWLock *q)
 {
 	QLp *p, *mp;
 
-	lock(&q->lock);
 	if(q->_readers == 0 && q->writer == 0){
 		/* noone waiting, go for it */
 		q->writer = 1;
@@ -224,6 +254,23 @@ wlock(RWLock *q)
 	while((*_rendezvousp)(mp, (void*)1) == (void*)~0)
 		;
 	mp->inuse = 0;
+}
+
+void
+wlock(RWLock *q)
+{
+	lock(&q->lock);
+	_wlock(q);
+}
+
+int
+wlockt(RWLock *q, uint32_t ms)
+{
+	if(lockt(&q->lock, ms)){
+		_wlock(q);
+		return 1;
+	}
+	return 0;
 }
 
 int
@@ -282,14 +329,11 @@ wunlock(RWLock *q)
 	unlock(&q->lock);
 }
 
-void
-rsleep(Rendez *r)
+static void
+_rsleep(Rendez *r)
 {
 	QLp *t, *me;
 
-	if(!r->l)
-		abort();
-	lock(&r->l->lock);
 	/* we should hold the qlock */
 	if(!r->l->locked)
 		abort();
@@ -322,6 +366,27 @@ rsleep(Rendez *r)
 	while((*_rendezvousp)(me, (void*)1) == (void*)~0)
 		;
 	me->inuse = 0;
+}
+
+void
+rsleep(Rendez *r)
+{
+	if(!r->l)
+		abort();
+	lock(&r->l->lock);
+	_rsleep(r);
+}
+
+int
+rsleept(Rendez *r, uint32_t ms)
+{
+	if(!r->l)
+		abort();
+	if(lockt(&r->l->lock, ms)){
+		_rsleep(r);
+		return 1;
+	}
+	return 0;
 }
 
 int

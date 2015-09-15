@@ -445,6 +445,7 @@ struct Lock {
 extern int	_tas(int*);
 
 extern	void	lock(Lock*);
+extern	int	lockt(Lock*,uint32_t);
 extern	void	unlock(Lock*);
 extern	int	canlock(Lock*);
 
@@ -466,6 +467,7 @@ struct QLock
 } QLock;
 
 extern	void	qlock(QLock*);
+extern	int	qlockt(QLock*, uint32_t);
 extern	void	qunlock(QLock*);
 extern	int	canqlock(QLock*);
 extern	void	_qlockinit(void* (*)(void*, void*));	/* called only by the thread library */
@@ -481,9 +483,11 @@ struct RWLock
 } RWLock;
 
 extern	void	rlock(RWLock*);
+extern	int	rlockt(RWLock*, uint32_t);
 extern	void	runlock(RWLock*);
 extern	int	canrlock(RWLock*);
 extern	void	wlock(RWLock*);
+extern	int	wlockt(RWLock*, uint32_t);
 extern	void	wunlock(RWLock*);
 extern	int	canwlock(RWLock*);
 
@@ -496,6 +500,7 @@ struct Rendez
 } Rendez;
 
 extern	void	rsleep(Rendez*);	/* unlocks r->l, sleeps, locks r->l again */
+extern	int	rsleept(Rendez *, uint32_t);
 extern	int	rwakeup(Rendez*);
 extern	int	rwakeupall(Rendez*);
 extern	void**	privalloc(void);
