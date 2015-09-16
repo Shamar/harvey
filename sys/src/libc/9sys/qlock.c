@@ -55,11 +55,12 @@ getqlp(void)
 	return p;
 }
 
-static void
-_qlock(QLock *q)
+void
+qlock(QLock *q)
 {
 	QLp *p, *mp;
 
+	lock(&q->lock);
 	if(!q->locked){
 		q->locked = 1;
 		unlock(&q->lock);
@@ -83,18 +84,68 @@ _qlock(QLock *q)
 	mp->inuse = 0;
 }
 
-void
-qlock(QLock *q)
-{
-	lock(&q->lock);
-	_qlock(q);
-}
-
 int
 qlockt(QLock *q, uint32_t ms)
 {
+	QLp *p, *mp;
+	uint64_t step, end;
+	
+	end = (ms * 1000 * 1000) + nsec();
+	
 	if(lockt(&q->lock, ms)) {
-		_qlock(q);
+		
+		if(!q->locked){
+			q->locked = 1;
+			unlock(&q->lock);
+			return 1;
+		}
+
+		/* set up alarm to interrupt rendezvous */
+		step = nsec();
+		if (step > end) {
+			unlock(&q->lock);
+			return 0;
+		}
+
+		/* add 1ms to "ensure" that end is gone before the interrupt */
+		alarm(1 + (end - step) / (1000 * 1000)); 
+		
+		/* chain into waiting list */
+		mp = getqlp();
+		p = q->tail;
+		if(p == nil)
+			q->head = mp;
+		else
+			p->next = mp;
+		q->tail = mp;
+		mp->state = Queuing;
+		unlock(&q->lock);
+
+		/* wait */
+		while((*_rendezvousp)(mp, (void*)1) == (void*)~0) {
+			step = nsec();
+			if (step > end) {
+				/* interrupt by alarm: unqueue and return */
+				lock(&q->lock);
+				p = q->head;
+				if(p != nil){
+					while(p != nil && p != mp && p->next != mp && p != q->tail)
+						p = p->next;
+					if(p == mp){
+						/* mp was head */ 
+						q->head = p->next;
+					} else {
+						p->next = mp->next;
+					}
+					if(q->head == nil)
+						q->tail = nil;
+				}
+				unlock(&q->lock);
+				return 0;
+			}
+		}
+		mp->inuse = 0;
+
 		return 1;
 	}
 	return 0;
