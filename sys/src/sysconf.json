@@ -653,6 +653,17 @@
 			"Ret": [
 				"int32_t"
 			]
+		},
+		{
+			"#Id": 62,
+			"Args": [
+				"uint32_t"
+			],
+			"Id": 4158,
+			"Name": "awake",
+			"Ret": [
+				"int32_t"
+			]
 		}
 	],
 	"Syserrors": [

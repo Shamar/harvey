@@ -667,6 +667,7 @@ extern	void	_exits(const char*);
 
 extern	int	access(const char*, int);
 extern	int32_t	alarm(uint32_t);
+extern	int32_t	awake(uint32_t);
 extern	int	await(char*, int);
 extern	int	bind(const char*, const char*, int);
 extern	int	brk(void*);

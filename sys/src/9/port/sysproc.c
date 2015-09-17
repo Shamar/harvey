@@ -771,6 +771,23 @@ sysalarm(Ar0* ar0, ...)
 }
 
 void
+sysawake(Ar0* ar0, ...)
+{
+	unsigned long ms;
+	va_list list;
+	va_start(list, ar0);
+
+	/*
+	 * long alarm(unsigned long millisecs);
+	 * Odd argument type...
+	 */
+	ms = va_arg(list, unsigned long);
+	va_end(list);
+
+	ar0->l = procawake(ms);
+}
+
+void
 sysexits(Ar0* ar0, ...)
 {
 	Proc *up = externup();

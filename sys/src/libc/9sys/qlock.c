@@ -108,7 +108,7 @@ qlockt(QLock *q, uint32_t ms)
 		}
 
 		/* add 1ms to "ensure" that end is gone before the interrupt */
-		alarm(1 + (end - step) / (1000 * 1000)); 
+		awake(1 + (end - step) / (1000 * 1000)); 
 		
 		/* chain into waiting list */
 		mp = getqlp();
