@@ -207,7 +207,7 @@ usize		mntversion(Chan*, uint32_t, char*, usize);
 void		mountfree(Mount*);
 uint64_t		ms2fastticks(uint32_t);
 #define		MS2NS(n) (((int64_t)(n))*1000000LL)
-uint32_t		ms2tk(uint32_t);
+#define		ms2tk(n) (((n)*HZ+500)/1000)
 void		mul64fract(uint64_t*, uint64_t, uint64_t);
 void		muxclose(Mnt*);
 void		(*mwait)(void *);
@@ -245,7 +245,7 @@ void		pageunchain(Page*);
 void		panic(char*, ...);
 Cmdbuf*		parsecmd(char *a, int n);
 void		pathclose(Path*);
-uint32_t		perfticks(void);
+uint64_t		perfticks(void);
 void		pexit(char*, int);
 Page*		pgalloc(usize, int);
 void		pgfree(Page*);
@@ -263,8 +263,8 @@ int		pprint(char*, ...);
 int		preempted(void);
 void		prflush(void);
 void		printinit(void);
-uint32_t		procalarm(uint32_t);
-uint32_t		procawake(uint32_t);
+uint64_t		procalarm(uint64_t);
+int64_t		procawake(int64_t);
 void		procctl(Proc*);
 void		procdump(void);
 int		procfdprint(Chan*, int, int, char*, int);
@@ -379,7 +379,7 @@ void		timerdel(Timer*);
 void		timerintr(Ureg*, int64_t);
 void		timerset(uint64_t);
 void		timersinit(void);
-uint32_t		tk2ms(uint32_t);
+#define		tk2ms(x) ((x)*(1000/HZ))
 #define		TK2MS(x) ((x)*(1000/HZ))
 uint64_t		tod2fastticks(int64_t);
 int64_t		todget(int64_t*);
@@ -387,7 +387,7 @@ void		todinit(void);
 void		todset(int64_t, int64_t, int);
 void		todsetfreq(int64_t);
 Block*		trimblock(Block*, int, int);
-void		tsleep(Rendez*, int (*)(void*), void*, int32_t);
+void		tsleep(Rendez*, int (*)(void*), void*, int64_t);
 Uart*		uartconsole(int, char*);
 int		uartctl(Uart*, char*);
 int		uartgetc(void);

@@ -1,13 +1,30 @@
 #include <u.h>
 #include <libc.h>
-#define RET 0xc3
+
+/* Test alarm(2):
+ * - alarms replace each other (the last one wins)
+ * - alarms are received as notes
+ * - alarms are received (more or less) on time
+ *
+ * Given we have two clocks at work here, we can use one to
+ * check the other:
+ * - nsec() is an high resolution clock from RDTSC instruction
+ *   (see sysproc.c, portclock.c and tod.c in sys/src/9/port)
+ * - sys->ticks incremented by hzclock (in portclock.c) that
+ *   is used by alarm (and sleep and the kernel scheduler)
+ */
+
+int verbose = 0;
+int64_t alarmReceived;
 
 int
 printFirst(void *v, char *s)
 {
 	/* just not exit, please */
 	if(strcmp(s, "alarm") == 0){
-		fprint(2, "%d: noted: %s at %lld\n", getpid(), s, nsec());
+		alarmReceived = nsec();
+		if(verbose)
+			fprint(2, "%d: noted: %s at %lld\n", getpid(), s, nsec());
 		atnotify(printFirst, 0);
 		return 1;
 	}
@@ -38,9 +55,16 @@ main(void)
 	a2000 = nsec();
 	alarm(500);
 	a500 = nsec();
-	fprint(2, "%d: alarm(2000)@%lld, alarm(500)@%lld\n", getpid(), a2000, a500);
 	while(sleep(5000) < 0)
 		;
+
+	if(verbose)
+		fprint(2, "%d: set alarm(2000)@%lld then alarm(500)@%lld; received after %lld nanosecond\n", getpid(), a2000, a500, alarmReceived-a500);
+
+	if(alarmReceived-a500 > 700 * 1000 * 1000){
+		print("FAIL\n");
+		exits("FAIL");
+	}
 	
 	print("PASS\n");
 	exits("PASS");
