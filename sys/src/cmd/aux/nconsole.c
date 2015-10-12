@@ -17,7 +17,7 @@ int tochld[2];
 static char Ebusy[] = "device is busy";
 static char Eintr[] = "interrupted";
 static char Eperm[] = "permission denied";
-static char Eio[] = "i/o error";
+//static char Eio[] = "i/o error";
 static char Enonexist[] = "file does not exist";
 static char Ebadspec[] = "bad attach specifier";
 static char Ewalk[] = "walk in non directory";
@@ -411,7 +411,7 @@ static Rune kbtabctrl[256] =
 };
 
 int
-keybscan(uint8_t code, char *out, int len)
+keybscan(uint8_t code, uint8_t *out, int len)
 {
 	Rune c;
 	int keyup;
@@ -493,7 +493,7 @@ if (chatty9p) fprint(2, "kbscan: code 0x%x out %p len %d\n", code, out, len);
 	 *  normal character
 	 */
 	if(!(c & (Spec|KF))){
-		off += runetochar(out+off, &c);
+		off += runetochar((char*)out+off, &c);
 		return off;
 	} else {
 		switch(c){
@@ -537,7 +537,7 @@ if (chatty9p) fprint(2, "kbscan: code 0x%x out %p len %d\n", code, out, len);
 		}
 	}
 
-	off += runetochar(out+off, &c);
+	off += runetochar((char*)out+off, &c);
 	return off;
 
 }
@@ -568,7 +568,7 @@ int cgapos;
 uint8_t CGA[16384];
 
 static void
-cgaputc(int c)
+cgaputc(uint8_t c)
 {
 	int i;
 	uint8_t *cga, *p;
@@ -634,13 +634,12 @@ threadmain(int argc, char *argv[])
 {
 	int fd0, fd1, fd2;
 	int ps2fd = 0, cgafd = 1;
-	int pid, wpid;
+	int pid, wpid, rpid, tpid;
 	int i, n, off, len;
 	static uint8_t ibuf[32];
-	static char buf[8*sizeof ibuf];
+	static uint8_t buf[8*sizeof ibuf];
 	char *argv0 = argv[0];
 
-	chatty9p++;
 	ARGBEGIN{
 	case 'd':
 		chatty9p++;
@@ -655,23 +654,23 @@ threadmain(int argc, char *argv[])
 	if (chatty9p) fprint(2, "Try to fork %s\n", argv[0]);
 	if (! stdinmode) {
 		if((ps2fd = open("#P/ps2keyb", OREAD)) == -1){
-			errstr(buf, sizeof buf);
-			fprint(2, "open #P/ps2keyb: %s\n", buf);
+			fprint(2, "open #P/ps2keyb: %r\n");
 			exits("open");
 		}
 
 		if((cgafd = open("#P/cgamem", OWRITE)) == -1){
-			errstr(buf, sizeof buf);
-			fprint(2, "open #P/cgamem: %s\n", buf);
+			fprint(2, "open #P/cgamem: %r\n");
 			exits("open");
 		}
 	}
+	
+	rfork(RFNOTEG);
 
 	pipe(frchld);
 	pipe(tochld);
 	reqchan = chancreate(sizeof(Req*), 8);
 	flushchan = chancreate(sizeof(Req*), 8);
-	procrfork(cpuproc, nil, 16*1024, RFNAMEG|RFNOTEG);
+	procrfork(cpuproc, nil, 16*1024, RFNAMEG);
 	threadpostmountsrv(&fs, nil, "/dev", MBEFORE);
 
 	// rfnameg to put command into a new pgid (in case we are init)
@@ -686,7 +685,7 @@ threadmain(int argc, char *argv[])
 			fprint(fd2, "WTF? open of clean gave fds of %d, %d, %d\n", fd0, fd1, fd2);
 			exits("bad FDs");
 		}
-		exec(argv[0], argv+1);
+		exec(argv[0], argv);
 		fprint(2, "exec of %s failed: %r", argv[0]);
 		exits(smprint("EXEC FAILED: %r"));
 	default:
@@ -720,9 +719,14 @@ if (chatty9p) fprint(2, "write %d, %p, %d\n", tochld[0], buf, off);
 			}
 		}
 if (chatty9p) fprint(2, "psfd read returned <= 0\n");
-		postnote(PNPROC, getppid(), "interrupt");
 		exits(nil);
 	default:
+		break;
+	}
+	switch(rpid = rfork(RFPROC|RFFDG)){
+	case -1:
+		exits("rfork");
+	case 0:
 		close(0);
 		close(ps2fd);
 		close(tochld[0]);
@@ -751,11 +755,22 @@ if (chatty9p) fprint(2, "read returns %d\n", n);
 			exits("read");
 		}
 		close(cgafd);
-		postnote(PNPROC, wpid, "interrupt");
-		postnote(PNPROC, pid, "interrupt");
-		waitpid();
-		waitpid();
+		exits(nil);
 	}
+	tpid = waitpid();
+	if(tpid == pid){
+		threadexitsall(nil);
+		chanfree(reqchan);
+		chanfree(flushchan);
+		postnote(PNGROUP, wpid, "interrupt");
+	} else if(tpid == wpid){
+		postnote(PNGROUP, rpid, "interrupt");
+	} else if(tpid == rpid){
+		postnote(PNGROUP, wpid, "interrupt");
+	} else 
+		abort();
+	while(waitpid())
+		;
 
 	exits(nil);
 }
