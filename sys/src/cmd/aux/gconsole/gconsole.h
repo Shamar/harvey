@@ -31,9 +31,24 @@ extern int blind;	/* no feedback for input, disable rawmode */
 extern void enabledebug(void);
 extern void debug(const char *, ...);
 
-extern int initialize(int *, int *);
+extern int initialize(int *);
 extern void serve(int);
+extern int connect(int);
 
 extern void writecga(int, int);
 
-extern void readkeyboard(int, int, int);
+extern void readkeyboard(int, int);
+
+typedef struct Buffer Buffer;
+struct Buffer
+{
+	int size;
+	int written;
+	int read;
+	char *data;
+};
+extern Buffer* balloc(uint32_t);
+extern uint32_t bwrite(Buffer *, char *, uint32_t);
+extern void bdelete(Buffer *b, uint32_t len);
+extern char *bread(Buffer *, uint32_t *);
+#define bempty(b) (b->written == b->read)

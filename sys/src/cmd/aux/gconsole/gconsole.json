@@ -19,6 +19,7 @@
 	"SourceFiles": [
 		"cga.c",
 		"debug.c",
+		"buffer.c",
 		"gconsole.c",
 		"keyboard.c",
 		"serve9p.c"

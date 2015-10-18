@@ -300,13 +300,11 @@ keybscan(uint8_t code, uint8_t *out, int len)
 
 }
 
-/* read from src, write to consreads (and conswrite,
- * if a visual feedback is required)
- */
+/* read from src, write to consreads */
 void
-readkeyboard(int src, int consreads, int conswrites)
+readkeyboard(int src, int consreads)
 {
-	int32_t pid, i, r, w, fb, scan, produced;
+	int32_t pid, i, r, w, scan, produced;
 	static uint8_t ibuf[KeyboardBufferSize];
 	static uint8_t obuf[ScreenBufferSize];
 
@@ -317,7 +315,6 @@ readkeyboard(int src, int consreads, int conswrites)
 	do
 	{
 		produced = 0;
-		fb = 0;
 		w = 0;
 		r = read(src, ibuf, KeyboardBufferSize);
 		debug("readkeyboard %d: read(%d) returns %d\n", pid, src, r);
@@ -335,35 +332,21 @@ readkeyboard(int src, int consreads, int conswrites)
 		if(produced){
 			w = write(consreads, obuf, produced);
 			debug("readkeyboard %d: write(consreads) returns %d\n", pid, w);
-			if(!rawmode && w > 0) {
-				/* give a feedback to the user
-				 *
-				 * note: conswrites is a pipe(2) preserving record boundaries
-				 *       thus it should be safe to write it concurrently
-				 * note: we send to the user up to w bytes:
-				 *       what cons readers received match what the user
-				 * 		 will see (even if this might by funny)
-				 */
-				fb = write(conswrites, obuf, w);
-				debug("readkeyboard %d: write(conswrites) returns %d\n", pid, fb);
-			}
 		}
 	}
-	while(r > 0 && w == produced && (rawmode || fb == produced));
+	while(r > 0 && w == produced);
 
-	debug("readkeyboard %d: shut down (r = %d, w = %d, rawmode = %d, fb = %d)\n", pid, r, w, rawmode, fb);
+	debug("readkeyboard %d: shut down (r = %d, w = %d)\n", pid, r, w);
 	close(src);
 	debug("readkeyboard %d: close(%d)\n", pid, src);
 	close(consreads);
 	debug("readkeyboard %d: close(%d)\n", pid, consreads);
-	close(consreads);
-	debug("readkeyboard %d: close(%d)\n", pid, conswrites);
 
 	if(r < 0)
 		exits("read");
-	if(w < 0 || fb < 0)
+	if(w < 0)
 		exits("write");
-	if(w < produced || (rawmode && fb < produced))
+	if(w < produced)
 		exits("i/o error");
 	exits(nil);
 }
