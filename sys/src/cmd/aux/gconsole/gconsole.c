@@ -32,7 +32,7 @@ void
 joint(char *name, int input, int output)
 {
 	int32_t pid, r, w;
-	uint8_t buf[IODATASZ];
+	static uint8_t buf[IODATASZ];
 
 	pid = getpid();
 
@@ -68,7 +68,7 @@ void
 wye(char *name, int input, int output, int feedback)
 {
 	int32_t pid, r, w, fb;
-	uint8_t buf[IODATASZ];
+	static uint8_t buf[IODATASZ];
 
 	pid = getpid();
 

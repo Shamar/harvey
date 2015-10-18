@@ -31,7 +31,8 @@ extern int blind;	/* no feedback for input, disable rawmode */
 extern void enabledebug(void);
 extern void debug(const char *, ...);
 
-extern void serve(int, int, int);
+extern int initialize(int *, int *);
+extern void serve(int);
 
 extern void writecga(int, int);
 

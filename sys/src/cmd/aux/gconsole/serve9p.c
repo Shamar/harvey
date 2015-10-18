@@ -24,21 +24,27 @@
 enum
 {
 	Maxfdata	= IODATASZ,
+	Miniosize	= IOHDRSZ+ScreenBufferSize,
 	Maxiosize	= IOHDRSZ+Maxfdata,
 };
+
+static char data[Maxfdata];
 
 enum {
 	Qroot,
 	Qcons,
 	Qconsctl,
 	Nqid,
+	Qinput,
+	Qoutput,
+	Nhqid,
 };
 static struct Qtab {
 	char *name;
 	int mode;
 	int type;
 	int length;
-} qtab[Nqid] = {
+} qtab[Nhqid] = {
 	"/",
 		DMDIR|0555,
 		QTDIR,
@@ -53,8 +59,44 @@ static struct Qtab {
 		0222,
 		0,
 		0,
+
+	"",
+		0,
+		0,
+		0,
+
+	"in",		/* data from input will be written here */
+		DMAPPEND|DMEXCL|0200,
+		0,
+		0,
+
+	"out",		/* data to output will be read here */
+		DMEXCL|0400,
+		0,
+		0,
 };
 
+/* message size for the exported name space
+ *
+ * we will accept anything that is between Miniosize and Maxiosize
+ */
+static int messagesize = Maxiosize;
+
+/* Initialized on Qinput open */
+static int inputrfd;	/* read data for Qcons' Tread here */
+static int inputwfd;	/* write Qinput here */
+
+/* Initialized on Qoutput open */
+static int outputwfd;	/* write data from Qcons' Twrite here */
+static int outputrfd;	/* read data for Qoutput here */
+
+/* linked list of known fids
+ *
+ * NOTE: we don't free() Fids, because there's no appropriate point
+ *       in 9P2000 to do that, except the Tclunk of the attach fid,
+ *       that in our case corresponds to shutdown
+ *       (the kernel is our single client, we are doomed to trust it)
+ */
 typedef struct Fid Fid;
 struct Fid
 {
@@ -66,9 +108,7 @@ struct Fid
 static Fid *fids;
 static Fid **ftail;
 
-static int messagesize = Maxiosize;
-
-/* no need to lock fids, we have only one mount point */
+/* no need to lock fids, we have only one mount channel */
 static Fid*
 createFid(int32_t fd, Qid qid)
 {
@@ -94,6 +134,124 @@ findFid(int32_t fd)
 		fid = fid->next;
 	return fid;
 }
+
++/* little queue of pending reads */
++typedef struct ConsRead ConsRead;
++struct ConsRead
++{
++       int32_t tag;
++       ConsRead *next;
++};
++static ConsRead *pendingreads;
++static ConsRead **rtail;
++static int32_t readybytes;     /* ... of console input */
++static int32_t minreadsize;
++static int
++enqueue(int32_t tag, int32_t count)
++{
++       ConsRead *read;
++
++       read = (ConsRead*)malloc(sizeof(ConsRead));
++       if(!read)
++               return 0;
++       if(count < minreadsize)
++               minreadsize = count;
++       read->tag = tag;
++       read->next = nil;
++       *rtail = read;
++       rtail = &read->next;
++       return 1;
++}
+ static void
+-readcons(int consreads, Fcall *req, Fcall *rep, char *data)
++consumed(int32_t numbytes)
+ {
+-       int len;
++       int32_t old, new;
+ 
+-       if((len = pread(consreads, data, req->count, req->offset)) < 0) {
+-               rerror(rep, "i/o error");
+-               return;
++       do
++       {
++               old = readybytes;
++               new = old - numbytes;
+        }
+-       rep->type = Rread;
+-       rep->data = data;
+-       rep->count = len;
++       while(!cas32((uint32_t*)&readybytes, old, new));
++}
++
++static int
++sendreadybytes(int connection, int inputfd, Fcall *rep, char *data)
++{
++       int rb, r, w;
++       ConsRead *t;
++
++       if(pendingreads && readybytes > 0)
++       {
++               rb = readybytes;
++               if(rb > minreadsize)
++                       rb = minreadsize;
++
++               if((r = read(inputfd, data, rb)) < 0) {
++                       /* we had an error reading a full input pipe: stop to serve() */
++                       debug("serve9p %d: sendreadybytes: %d bytes ready but read returns %d\n", getpid(), readybytes, r);
++                       return -2;      /* a value that sendmessage cannot return */
++               }
++               rep->count = r;
++               rep->data = data;
++
++               t = pendingreads;
++               while(t != nil){
++                       pendingreads = t->next;
++
++                       rep->tag = t->tag;
++                       w = sendmessage(connection, rep);
++                       if(w <= 0){
++                               /* we had an error on the connection: stop to serve() */
++                               debug("serve9p %d: sendreadybytes: %d bytes ready, but sendmessage returns %d\n", getpid(), readybytes, w);
++                               return w;
++                       }
++
++                       free(t);
++               }
++               rtail = &pendingreads;
++               minreadsize = (uint32_t)-1;
++               consumed(r);
++       }
++       return 1;
++}
++/* cons specific rread */
++static int
++consread(int consreads, Fcall *req, Fcall *rep, char *data)
++{
++       int l;
++
++       l = req->count;
++       if(!l){
++               /* NOTE: gconsole does not preserve record boundaries on /cons!
++                *
++                * If a mad client send an empty read, it will receive nothing
++                * without boring the input device.
++                *
++                * This is probably the only real case where a valid Tread get a 
++                * syncronous response... lucky Tread!
++                */
++               rep->type = Rread;
++               rep->data = data;
++               rep->count = 0;
++               return 1;
++       }
++       if(!enqueue(req->tag, l)){
++               /* syncronous response: try again, you might be lucky! */
++               rerror(rep, "out of memory");
++               return 1;
++       }
++       return 0;
+ }
+
 
 static int
 readmessage(int fd, Fcall *req)
@@ -160,7 +318,7 @@ fillstat(uint64_t path, Dir *d)
 	return 1;
 }
 static int32_t
-readtopdir(Fid *fid, uint8_t *buf, int64_t off, int32_t cnt, int blen)
+rootread(Fid *fid, uint8_t *buf, int64_t off, int32_t cnt, int blen)
 {
 	int32_t m, n;
 	int64_t i, pos;
@@ -190,7 +348,7 @@ rerror(Fcall *rep, char *err)
 }
 /* cons specific rread */
 static void
-readcons(int consreads, Fcall *req, Fcall *rep, char *data)
+consread(int consreads, Fcall *req, Fcall *rep, char *data)
 {
 	int len;
 
@@ -204,7 +362,7 @@ readcons(int consreads, Fcall *req, Fcall *rep, char *data)
 }
 /* cons specific rwrite */
 static void
-writecons(int conswrites, Fcall *req, Fcall *rep)
+conswrite(int conswrites, Fcall *req, Fcall *rep)
 {
 	int32_t l;
 
@@ -266,7 +424,7 @@ rauth(Fcall *req, Fcall *rep)
 static void
 rversion(Fcall *req, Fcall *rep)
 {
-	if(req->msize < 256){
+	if(req->msize < Miniosize){
 		rerror(rep, "message size too small");
 		return;
 	}
@@ -311,6 +469,10 @@ rwalk(Fcall *req, Fcall *rep)
 			q = (Qid){Qcons, 0, 0};
 		} else if (strcmp(qtab[Qconsctl].name, req->wname[0]) == 0) {
 			q = (Qid){Qconsctl, 0, 0};
+		} else if (inputwfd == 0 && strcmp(qtab[Qinput].name, req->wname[0]) == 0) {
+			q = (Qid){Qconsctl, 0, 0};
+		} else if (outputrfd == 0 && strcmp(qtab[Qoutput].name, req->wname[0]) == 0) {
+			q = (Qid){Qconsctl, 0, 0};
 		} else {
 			rerror(rep, "file does not exist");
 			return;
@@ -345,7 +507,7 @@ ropen(Fcall *req, Fcall *rep)
 	static int need[4] = { 4, 2, 6, 1 };
 	struct Qtab *t;
 	Fid *f;
-	int n;
+	int n, tmp[2];
 
 	f = findFid(req->fid);
 	if(f == nil){
@@ -365,11 +527,28 @@ ropen(Fcall *req, Fcall *rep)
 		f->opened = req->mode;
 		rep->type = Ropen;
 		rep->qid = f->qid;
-		rep->iounit = 0;
+		switch(f->qid.path)
+		{
+			case Qinput:
+				pipe(tmp);
+				inputwfd = tmp[0];
+				inputrfd = tmp[1];
+				req->iounit = KeyboardBufferSize;
+				break;
+			case Qoutput:
+				pipe(tmp);
+				outputrfd = tmp[0];
+				outputwfd = tmp[1];
+				req->iounit = ScreenBufferSize;
+				break;
+			default:
+				rep->iounit = 0;
+				break;
+		}
 	}
 }
-static void
-rread(int consreads, Fcall *req, Fcall *rep, char *data)
+static int
+rread(Fcall *req, Fcall *rep)
 {
 	Fid *f;
 	char *err;
@@ -389,15 +568,24 @@ rread(int consreads, Fcall *req, Fcall *rep, char *data)
 	}
 
 	rep->type = Rread;
-	if(f->qid.path == Qroot){
-		rep->count = readtopdir(f, (uint8_t*)data, req->offset, req->count, Maxfdata);
-		rep->offset = req->offset;
-		rep->data = data + req->offset;
-	} else if (f->qid.path == Qcons) {
-		readcons(consreads, req, rep, data);
-	} else {
-		/* consctl */
-		rpermission(req, rep);
+	switch(f->qid.path){
+		case Qroot;
+			rep->count = rootread(f, (uint8_t*)data, req->offset, req->count, Maxfdata);
+			rep->offset = req->offset;
+			rep->data = data + req->offset;
+			break;
+		case Qcons:
+			consread(consreads, req, rep, data);
+			break;
+		case Qconsctl:
+			rpermission(req, rep);
+			break;
+		case Qoutput:
+			consread(consreads, req, rep, data);
+			break;
+		default:
+			rerror(rep, "i/o error");
+			break
 	}
 }
 static void
@@ -424,7 +612,7 @@ rwrite(int conswrites, Fcall *req, Fcall *rep)
 	if(f->qid.path == Qroot){
 		rpermission(req, rep);
 	} else if (f->qid.path == Qcons) {
-		writecons(conswrites, req, rep);
+		conswrite(conswrites, req, rep);
 	} else {
 		/* consctl */
 		if(stdio && blind){
@@ -464,7 +652,7 @@ rstat(Fcall *req, Fcall *rep, char *data)
 	Fid *f;
 
 	f = findFid(req->fid);
-	if(f == nil){
+	if(f == nil || f->qid.path >= Nqid){
 		rerror(rep, "bad fid");
 		return;
 	}
@@ -488,6 +676,29 @@ static void (*fcalls[])(Fcall *, Fcall *) = {
 	[Twstat]	rpermission,
 };
 
+int
+initialize(int *fd, int *mntdev);
+{
+	int tmp[2];
+
+	pipe(tmp);
+	*fd = tmp[0];
+	*mntdev = 'M';
+
+	return tmp[1];
+}
+
+
+static void
+cachepipe(int *fd0, int *fd1)
+{
+	int tmp[2];
+
+	pipe(tmp);
+	*fd0 = tmp[0];
+	*fd1 = tmp[1];
+}
+
 /* serve9p is the main loop
  *
  * keep it simple:
@@ -496,10 +707,9 @@ static void (*fcalls[])(Fcall *, Fcall *) = {
  * otherwise we handle the request locally.
  */
 void
-serve(int connection, int consreads, int conswrites)
+serve(int connection)
 {
 	int pid, r, w;
-	char data[Maxfdata];
 	Fcall	rep;
 	Fcall	*req;
 
