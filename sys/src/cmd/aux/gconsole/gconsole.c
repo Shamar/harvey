@@ -65,18 +65,6 @@ joint(char *name, int input, int output)
 }
 
 void
-fortify(char *name)
-{
-	int r;
-
-	/* ensure that our services can not become evil */
-	rfork(RFCENVG|RFCNAMEG|RFREND);
-	if((r = bind("#p", "/proc", MREPL)) < 0)
-		sysfatal("%s %p: fortify: bind(#p) returns %d, %r", name, getpid(), r);
-	rfork(RFNOMNT);
-}
-
-void
 main(int argc, char *argv[])
 {
 	int mypid, input, output, devmnt, fs;
@@ -112,17 +100,16 @@ main(int argc, char *argv[])
 	fs = initialize(&devmnt);
 
 	/* start the file system */
-	switch(rfork(RFPROC|RFMEM|RFNOWAIT)){
+	switch(rfork(RFPROC|RFMEM|RFNOWAIT|RFCENVG|RFNOTEG|RFCNAMEG)){
 		case -1:
 			sysfatal("rfork (file server)");
 			break;
 		case 0:
 			PROVIDE(fs);
-			fortify("file server");
+			rfork(RFREND);
 			serve(fs);
 			break;
 		default:
-			close(fs);
 			break;
 	}
 
@@ -133,7 +120,7 @@ main(int argc, char *argv[])
 		output = 1;
 	else if((output = open("#P/cgamem", OWRITE)) == -1)
 		sysfatal("open #P/cgamem: %r");
-	switch(rfork(RFPROC|RFMEM|RFNOWAIT)){
+	switch(rfork(RFPROC|RFMEM|RFNOWAIT|RFNOTEG)){
 		case -1:
 			sysfatal("rfork (%s)", stdio ? "stdout writer" : "writecga");
 			break;
@@ -143,14 +130,13 @@ main(int argc, char *argv[])
 			if((input = open("/dev/gconsout", OREAD)) == -1)
 				sysfatal("open /dev/gconsout: %r");
 			PROVIDE(output);
-			fortify(stdio ? "stdout writer" : "writecga");
+			rfork(RFCENVG|RFCNAMEG|RFREND|RFNOMNT);
 			if(stdio)
 				joint("stdout writer", input, output);
 			else
 				writecga(input, output);
 			break;
 		default:
-			close(input);
 			close(output);
 			break;
 	}
@@ -160,7 +146,7 @@ main(int argc, char *argv[])
 		input = 0;
 	else if((input = open("#P/ps2keyb", OREAD)) == -1)
 		sysfatal("open #P/ps2keyb: %r");
-	switch(rfork(RFPROC|RFMEM|RFNOWAIT)){
+	switch(rfork(RFPROC|RFMEM|RFNOWAIT|RFNOTEG)){
 		case -1:
 			sysfatal("rfork (%s)", stdio ? "stdin reader" : "readkeyboard");
 			break;
@@ -170,7 +156,7 @@ main(int argc, char *argv[])
 			if((output = open("/dev/gconsin", OWRITE)) == -1)
 				sysfatal("open /dev/gconsin: %r");
 			PROVIDE(input);
-			fortify(stdio ? "stdin reader" : "readkeyboard");
+			rfork(RFCENVG|RFCNAMEG|RFREND|RFNOMNT);
 			if(stdio)
 				joint("stdin reader", input, output);
 			else
@@ -187,7 +173,7 @@ main(int argc, char *argv[])
 	debug("%s %d: all services started, ready to exec(%s)\n", argv0, mypid, argv[0]);
 
 	/* become the requested program */
-	rfork(RFNAMEG|RFNOTEG|RFREND);
+	rfork(RFNOTEG|RFREND);
 
 	if(mount(connect(fs), -1, "/dev", MBEFORE, "", devmnt) == -1)
 		sysfatal("mount (%s)", stdio ? "stdin reader" : "readkeyboard");

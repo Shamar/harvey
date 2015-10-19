@@ -25,16 +25,20 @@ balloc(uint32_t size)
 {
 	Buffer* b;
 
-	b = (Buffer*)malloc(sizeof(Buffer)+size);
+	b = (Buffer*)malloc(sizeof(Buffer));
 	b->written = 0;
 	b->read = 0;
 	b->size = size;
+	b->data = (char*)malloc(size);
 
 	return b;
 }
 uint32_t
 bwrite(Buffer *b, char *source, uint32_t len)
 {
+	uint32_t i;
+	char *dest;
+
 	if(b->read == b->written){
 		b->written = 0;
 		b->read = 0;
@@ -43,7 +47,10 @@ bwrite(Buffer *b, char *source, uint32_t len)
 		len = b->size - b->written;
 	if(len == 0)
 		return 0;
-	memmove(b->data + b->written, source, len);
+	dest = b->data + b->written;
+	for(i = 0; i < len; ++i)
+		*dest++ = *source++;
+	debug("bwrite: %d char from %d \n", len, b->written);
 	b->written += len;
 	return len;
 }

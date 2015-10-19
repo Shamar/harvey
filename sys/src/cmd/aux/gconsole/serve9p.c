@@ -28,6 +28,15 @@ enum
 	Maxiosize	= IOHDRSZ+Maxfdata,
 };
 
+typedef enum
+{
+	Initializing,
+	Mounted,
+	Unmounted,
+} Status;
+
+static Status status;
+
 static char *data;
 
 enum {
@@ -66,21 +75,22 @@ static struct Qtab {
 		0,
 
 	"gconsin",		/* data from input will be written here */
-		DMAPPEND|DMEXCL|0200,
+		DMAPPEND|DMEXCL|0222,
 		0,
 		0,
 
 	"gconsout",		/* data to output will be read here */
-		DMEXCL|0400,
+		DMEXCL|0444,
 		0,
 		0,
 };
 
 static int connections[2];
 
+
 /* message size for the exported name space
  *
- * we will accept anything that is between Miniosize and Maxiosize
+ * between Miniosize and Maxiosize
  */
 static int messagesize = Maxiosize;
 
@@ -107,7 +117,7 @@ struct Fid
 };
 static Fid *fids;
 static Fid **ftail;
-static int openfids;
+static Fid *external;	/* attach fid of the last mount() in gconsole.c */
 
 static Fid*
 createFid(int32_t fd, Qid qid)
@@ -337,13 +347,24 @@ rattach(Fcall *req, Fcall *rep)
 	if(spec && spec[0])
 		return rerror(rep, "bad attach specifier");
 
-	if(fids != nil){
-		/* the first fid in fids must always be the attach one */
+	if(external != nil){
+		/* we expect 3 valid Tattach:
+		 * 1 for the process that will send us the input, writing Qinput
+		 * 1 for the process that will print our output, reading Qoutput
+		 * 1 for the rest of the children
+		 */
 		return rerror(rep, "device busy");
 	}
-	f = createFid(req->fid, (Qid){Qroot, 0, QTDIR});
+	f = findFid(req->fid);
+	if(f == nil)
+		f = createFid(req->fid, (Qid){Qroot, 0, QTDIR});
 	if(f == nil)
 		return rerror(rep, "out of memory");
+
+	if(input != nil && output != nil){
+		external = f;
+		status = Mounted;
+	}
 
 	rep->type = Rattach;
 	rep->qid = f->qid;
@@ -447,7 +468,6 @@ ropen(Fcall *req, Fcall *rep)
 		return rpermission(req, rep);
 	else {
 		f->opened = req->mode;
-		++openfids;
 		rep->type = Ropen;
 		rep->qid = f->qid;
 		switch(f->qid.path)
@@ -566,8 +586,10 @@ rclunk(Fcall *req, Fcall *rep)
 	if(f == nil)
 		return rerror(rep, "bad fid");
 
+	if(f == external)
+		status = Unmounted;
+
 	f->opened = -1;
-	--openfids;
 	rep->type = Rclunk;
 	return 1;
 }
@@ -641,10 +663,12 @@ serve(int connection)
 	ftail = &fids;
 	qinit(&consreads);
 	qinit(&outputreads);
+	
+	status = Initializing;
 
 	debug("serve9p %d: started\n", pid);
 
-	for(;;)
+	do
 	{
 		if((r = readmessage(connection, req)) <= 0){
 			debug("serve9p %d: readmessage returns %d\n", pid, r);
@@ -674,12 +698,13 @@ serve(int connection)
 			break;
 		}
 	}
+	while(status != Unmounted);
 
 	/* signal our friends that we finished */
 	close(connection);
 	debug("serve9p %d: close(%d)\n", pid, connection);
 
-	debug("%s %d: shut down\n", argv0, pid);
+	debug("serve9p %d: shut down\n", pid);
 	if(r < 0)
 		sysfatal("serve9p: readmessage");
 	if(w < 0)
