@@ -199,11 +199,16 @@ struct OpQueue
 	int minsize;
 };
 #define qempty(q) (q->tail == &q->head)
-#define qinit(q) (q)->tail = &(q)->head
 
 static OpQueue consreads;
 static OpQueue outputreads;
 
+static void
+qinit(OpQueue *q)
+{
+	q->tail = &q->head;
+	q->minsize = (uint32_t)-1;
+}
 static int
 enqueue(OpQueue *queue, int32_t tag, int32_t count)
 {
