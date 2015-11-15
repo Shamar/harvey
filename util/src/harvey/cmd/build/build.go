@@ -353,12 +353,12 @@ func fetchOne(source string, target string) {
 	out, err := os.Create(target)
 	failOn(err)
 	defer out.Close()
-	resp, err2 := http.Get(source)
-	failOn(err2)
+	resp, err := http.Get(source)
+	failOn(err)
 	defer resp.Body.Close()
-	_, err3 := io.Copy(out, resp.Body)
-	failOn(err3)
-	log.Printf("Fetched %v -> %v\n", source, target)
+	l, err := io.Copy(out, resp.Body)
+	failOn(err)
+	log.Printf("Fetched %v -> %v (%d bytes)\n", source, target, l)
 }
 func fetch(files map[string]string) {
 	for target, source := range(files){
