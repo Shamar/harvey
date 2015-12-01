@@ -1,6 +1,7 @@
 language: c
 script:
  - if [ "${COVERITY_SCAN_BRANCH}" != 1 ]; then git clean -x -d -f && ./BUILD all ; fi
+ - for v in `find|grep vendor.json`; do (cd `dirname $v`; vendor -check) done
 compiler: 
  - gcc-4.8
 
