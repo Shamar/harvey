@@ -16,13 +16,14 @@ addons:
     sources:
     - ubuntu-toolchain-r-test
     packages:
+    - rc
     - gcc-4.8
   coverity_scan:
     project:
       name: "elbing/harvey"
       description: "Build submitted via Travis CI"
     notification_email: harvey@googlegroups.com
-    build_command_prepend: "./BUILD utils"
-    build_command:   "./BUILD all"
+    build_command_prepend: "./bootstrap.sh"
+    build_command:   "source envsetup && build all"
     branch_pattern: coverity_scan
 
